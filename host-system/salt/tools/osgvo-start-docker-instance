@@ -1,0 +1,67 @@
+#!/bin/bash
+
+LOCKFILE=/tmp/osgvo-start-docker-instance.pid
+if [ -e "$LOCKFILE" ]; then
+    PID=`cat $LOCKFILE`
+    if kill -0 $PID >/dev/null 2>&1; then
+        exit 0
+    fi
+fi
+echo $$ >$LOCKFILE
+
+# only start one when the container starts
+UPTIME=`cat /proc/uptime | sed 's/[\. ].*//'`
+if [ $UPTIME -gt 900 ]; then
+    echo "VM has run for too long to start new containers"
+    rm -f $LOCKFILE
+    exit 0
+fi
+
+COUNT=`docker ps -q | wc -l`
+if [ $COUNT -gt 0 ]; then
+    echo "$COUNT containers are running. Not doing anything."
+    rm -f $LOCKFILE
+    exit 0
+fi
+
+if [ ! -e /etc/osg-worker.conf ]; then
+    echo "/etc/osg-worker.conf does not exist yet"
+    rm -f $LOCKFILE
+    exit 0
+fi
+
+echo "No containers are running. Starting a new one"
+
+# ensure CVMFS filesystems are mounted
+for FS in \
+       ams.cern.ch \
+       atlas.cern.ch \
+       cms.cern.ch \
+       connect.opensciencegrid.org \
+       desdm.osgstorage.org \
+       gwosc.osgstorage.org \
+       icecube.opensciencegrid.org \
+       ligo-containers.opensciencegrid.org \
+       nexo.opensciencegrid.org \
+       oasis.opensciencegrid.org \
+       singularity.opensciencegrid.org \
+       snoplus.egi.eu \
+       spt.opensciencegrid.org \
+       stash.osgstorage.org \
+       veritas.opensciencegrid.org \
+       xenon.opensciencegrid.org \
+       sw.lsst.eu \
+ ; do
+	ls -l /cvmfs/$FS/ >/dev/null 2>&1
+done
+
+docker pull opensciencegrid/osgvo-cloud-worker:latest
+
+docker run --rm --user osg \
+       --cap-add=DAC_OVERRIDE --cap-add=SETUID --cap-add=SETGID \
+       --cap-add=SYS_ADMIN --cap-add=SYS_CHROOT --cap-add=SYS_PTRACE \
+       -v /cvmfs:/cvmfs -v /etc/osg-worker.conf:/etc/osg-worker.conf \
+       opensciencegrid/osgvo-cloud-worker:latest
+
+rm -f $LOCKFILE
+
